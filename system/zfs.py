@@ -225,6 +225,7 @@ EXAMPLES = '''
 
 
 import os
+import re
 
 class Zfs(object):
     def __init__(self, module, name, properties):
@@ -300,9 +301,26 @@ class Zfs(object):
         else:
             self.module.fail_json(msg=out)
 
+    def normalize_units(self, value):
+        if value.lower() == "none":
+            return "none"
+        regex = '^(?P<number>\d+)(?P<units>([Bb]|[KkMmGgTtPpEeZz][Bb]?)$)'
+        match = re.search(regex, value)
+        if match:
+            return match.group('number') + match.group('units')[0].upper()
+
     def set_properties_if_changed(self):
         current_properties = self.get_current_properties()
         for prop, value in self.properties.iteritems():
+            if prop in ('quota', 'recordsize', 'refquota', 'refreservation',
+                        'reservation', 'volsize', 'volblocksize'):
+                # ZFS displays units as single uppercase letters but accepts
+                # other formatting. If a playbook uses other formatting, it
+                # will never match the property as displayed by `zfs get`
+                # so the property will always be changed.
+                value = normalize_units(value)
+                if value is None:
+                    self.module.fail_json(msg='Invalid value for %s. See zfs(1M) for details.' % prop)
             if current_properties[prop] != value:
                 if prop in self.immutable_properties:
                     self.module.fail_json(msg='Cannot change property %s after creation.' % prop)
